@@ -1,6 +1,6 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# This is a python 2 file
+# This is a python 2/3 hybrid file
 """
 The script allows arbitrary socket and HTTP(S) connections via:
 - socket and ssl-wrapped sockets - when you need bare bone or non-HTTP(S)
