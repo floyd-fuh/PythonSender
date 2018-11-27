@@ -145,8 +145,8 @@ SEND_THROUGH_PROXY = False
 ###############################
 
 def main():
-    # EXAMPLE: Send numbers from 0 to 2 as Firefox User-Agent minor version:
-    corpus = range(0, 3)
+    # EXAMPLE: Send numbers 0 and 1 as Firefox User-Agent minor version:
+    corpus = range(0, 2)
     if TREQ_LIB:
         treq_sender = TreqSender()
     for i in corpus:
