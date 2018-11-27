@@ -62,6 +62,8 @@ TREQ_LIB = False
 try:
     import treq
     from twisted.internet import reactor
+    import twisted.internet._sslverify as sslverify
+    sslverify.platformTrust = lambda : None
     from twisted.web.error import Error as TwistedWebError
     from twisted.internet.error import ConnectionRefusedError
     from twisted.internet.error import TimeoutError
