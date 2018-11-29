@@ -1,5 +1,7 @@
 # PythonSender
 
+This is a CTF/Pentest helper script, which means this is used to simulate attacks on servers. Therefore it ignores any certificates of the server side. Please do never use this in production.
+
 The script allows arbitrary socket and HTTP(S) connections via:
 
 * socket and ssl-wrapped sockets - when you need bare bone or non-HTTP(S)
