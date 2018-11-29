@@ -55,7 +55,7 @@ try:
     from requests.packages.urllib3.exceptions import InsecureRequestWarning
     requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
     REQUESTS_LIB = True
-except:
+except ImportError as e:
     print("Warning: You do not have the 'requests' library installed in python. This script will only work partially (with urllib). Run 'pip install requests' for your python version.")
     
 TREQ_LIB = False
@@ -64,13 +64,23 @@ try:
     from twisted.internet import reactor
     import twisted.internet._sslverify as sslverify
     sslverify.platformTrust = lambda : None
+    from twisted.web.client import Agent, HTTPConnectionPool, readBody
     from twisted.web.error import Error as TwistedWebError
+    from twisted.internet.defer import DeferredSemaphore
+    from twisted.internet.defer import DeferredLock
     from twisted.internet.error import ConnectionRefusedError
     from twisted.internet.error import TimeoutError
     from OpenSSL.SSL import Error as OpenSSLError
     TREQ_LIB = True
-except:
+except ImportError as e:
     print("Warning: You do not have the 'treq' library installed in python. This script will only work partially. Run 'pip install treq' for your python version.")
+
+# TODO: Is this worth doing on Linux?
+# try:
+#     from twisted.internet import epollreactor
+#     epollreactor.install()
+# except ImportError as e:
+#     print("EPOLL not available (Linux only)")
 
 if not REQUESTS_LIB or not TREQ_LIB:
     time.sleep(1)
@@ -147,53 +157,60 @@ SEND_THROUGH_PROXY = False
 def main():
     # EXAMPLE: Send numbers 0 and 1 as Firefox User-Agent minor version:
     corpus = range(0, 2)
+    if REQUESTS_LIB:
+        send_with_requests(corpus)
+    send_with_urllib(corpus)
+    send_with_socket(corpus)
     if TREQ_LIB:
-        treq_sender = TreqSender()
+        send_with_treq(corpus)
+
+def send_with_requests(corpus):
     for i in corpus:
-        info("Trying", i)
-        # parsing the raw request
         req = RawHttpRequest(START + str(i) + END, TLS)
-        
-        if REQUESTS_LIB:
-            info("sending it with the requests library (which is the most sane choice and can return what we expect - the body HTML)")
-            result(repr(send_requests(req)[:60])+ "...") 
-            #result(repr(send_requests(req)))
-            #r = send_requests(req, entire_response=True)
-            #info(r.request.headers)
-        
-        info("Sending it with the urllib library, wouldn't process Content-Encoding (HTML would be gzip'ed) if we wouldn't remove Accept-Encoding in request")
-        result(repr(send_urllib(req)[:60]) + "...")
+        info(i, "sending it with the requests library (which is the most sane choice and can return what we expect - the body HTML)")
+        result(repr(send_requests(req)[:60])+ "...")
+        #result(repr(send_requests(req)))
+        #r = send_requests(req, entire_response=True)
+        #debug(r.request.headers)
+        debug_sleep(15)
+
+def send_with_urllib(corpus):
+    for i in corpus:
+        req = RawHttpRequest(START + str(i) + END, TLS)
+        info(i, "sending it with the urllib library, wouldn't process Content-Encoding (HTML would be gzip'ed) if we wouldn't remove Accept-Encoding in request")
+        result(repr(send_urllib(req)[:60])+ "...")
         #result(repr(send_urllib(req)))
-        #resp = send_urllib(req, entire_response=True)
-        #info(resp.info())
-        
-        info("Sending it via socket, which doesn't know the HTTP protocols and also returns the HTTP headers and also a gziped body (method doesn't remove Accept-Encoding)")
+        #r = send_urllib(req, entire_response=True)
+        #info(r.request.headers)
+        debug_sleep(15)
+
+def send_with_socket(corpus):
+    for i in corpus:
+        req = RawHttpRequest(START + str(i) + END, TLS)
+        # although this makes more sense in the non-HTTP case:
         #req = RawRequest(START + str(i) + END, TLS, HOST, PORT)
+        info(i, "sending it via socket, which doesn't know the HTTP protocols and also returns the HTTP headers and also a gziped body (method doesn't remove Accept-Encoding)")
         result(repr(send_socket(req)[:60]) + "...")
         #result(repr(send_socket(req)))
-        
-        # If we need to do it quickly we can send it via Python Twisted and Treq is a higher level API for it
-        # The API is kept very similar to requests
-        # However, as asynchronous network io works very differently from a code perspective, this will need a callback function
-        if TREQ_LIB:
-            treq_sender.add(req)
-        
-        # When debugging, wait 15 seconds after every request that is sent
-        if DEBUG:
-            time.sleep(15)
-        print()
-        
-    if TREQ_LIB:
-        # When everything is passed to Twisted, start the work
-        info("Sending via treq/Twisted all at once with asynchronous io")
-        treq_sender.run()
+        debug_sleep(15)
+
+def send_with_treq(corpus):
+    # If we need to do it quickly we can send it via Python Twisted and Treq is a higher level API for it
+    # The API is kept very similar to requests
+    # However, as asynchronous network IO works very differently from a code perspective, this will need callback functions
+    # at a lot of places. Also deferring things like locks is necessary. Therefore, you will need to reimplement the
+    # TreqSenderExample to do your work for you, but it is kept as simple as possible.
+    
+    info("Sending via treq/Twisted all at once with asynchronous io")
+    # Here you can pass how many TCP connections should be opened at the same time...
+    # They will be used in a keep-alive fashion to send multiple HTTP requests through the same TCP stream
+    treq_sender = TreqSenderExample(corpus, concurrent=10)
 
 ###############################
 ###
-# END: Usually you hopefully don't need to change things below here
+# END: Usually you hopefully don't need to change things below here EXCEPT the TreqSenderExample class
 ###
 ###############################
-
 
 ###############################
 ###
@@ -203,38 +220,57 @@ def main():
 
 class TreqSender(object):
     
-    def __init__(self):
+    def __init__(self, concurrent=7):
+        self.concurrent = concurrent
+        self.pool = HTTPConnectionPool(reactor)
+        self.pool.maxPersistentPerHost = self.concurrent
+        self.agent = Agent(reactor, pool=self.pool)
+        self.sem = DeferredSemaphore(concurrent)
         self.added = 0
+        self.added_lock = DeferredLock()
         self.done = 0
+        self.done_print_lock = DeferredLock()
     
-    def add(self, req):
-        self.send_treq(req, self.response_callback)
+    def add(self):
         self.added += 1
+    
+    def work_producer(self):
+        error("Coiterator not implemented in child class")
     
     def stop_reactor(self):
         try:
             reactor.stop()
         except Exception as e:
             error(e)
-
-    def body_callback(self, body):
-        # HERE! This is what you want to implement for treq
-        result(repr(body[:60]) + "...")
-        
+    
+    def no_concurrency_body(self, body):
+        error("no_concurrency_body not implemented in child class")
+    
+    def done_and_callback(self, body):
+        # This function is called with a lock, prevents concurrency, so the printing and everything the user implements
+        # in the body function is done one after each other and the counter
+        # correctly incremented
+        self.no_concurrency_body(body)
         self.done += 1
         if self.done >= self.added:
             self.stop_reactor()
+
+    def body_callback(self, body):
+        self.sem.release()
+        self.done_print_lock.run(self.done_and_callback, body)
 
     # For the treq callback
     def response_callback(self, response):
         r = response.content()
         r.addCallback(self.body_callback)
+        r.addErrback(self.body_callback)
     
     def run(self):
         reactor.run()
 
-    def send_treq(self, req, callback, allow_redirects=True):
+    def send_treq(self, semaphore, req, callback, allow_redirects=True):
         # Note how similar this is to the requests library...
+        self.added_lock.run(self.add)
         proxy_dict = None
         if SEND_THROUGH_PROXY:
             http_proxy  = "http://127.0.0.1:8080"
@@ -245,8 +281,31 @@ class TreqSender(object):
                           "https" : https_proxy, 
                         }
         headers = dict(req.header_tuples)
-        r = treq.request(req.method, req.url, data=req.body, headers=headers, proxies=proxy_dict, verify=False, timeout=TIMEOUT, allow_redirects=allow_redirects)
+        # As we have an HTTPConnectionPool that will send multiple HTTP requests in the same TCP connection
+        # TODO: Not sure if necessary (example.org seems to work without), but let's also add the 
+        # "Connection: keep-alive" header
+        headers["Connection"] = "keep-alive"
+        
+        r = treq.request(req.method, req.url, data=req.body, headers=headers, proxies=proxy_dict, 
+        verify=False, timeout=TIMEOUT, allow_redirects=allow_redirects, agent=self.agent)
         r.addCallback(callback)
+
+
+class TreqSenderExample(TreqSender):
+    
+    def __init__(self, corpus, concurrent=7):
+        super(TreqSenderExample, self).__init__(concurrent)
+        self.corpus = corpus
+        reactor.callWhenRunning(self.work_producer)
+        self.run()
+        
+    def work_producer(self):
+        for i in self.corpus:
+            req = RawHttpRequest(START + str(i) + END, TLS)
+            self.sem.acquire().addCallback(self.send_treq, req, self.response_callback)            
+    
+    def no_concurrency_body(self, body):
+        result(repr(body[:60]) + "...")
 
 ###############################
 ###
@@ -514,6 +573,9 @@ def debug(*text):
     if DEBUG:
         print("[DEBUG] "+str(" ".join(str(i) for i in text)))
 
+def debug_sleep(time):
+    if DEBUG:
+        time.sleep(time)
 
 if __name__ == "__main__":
     main()
