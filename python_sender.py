@@ -37,12 +37,29 @@ Created on 2018 November 26
 
 ###############################
 ###
-# imports
+# imports:
+# requests treq twisted cryptography future
 ###
 ###############################
-
-from __future__ import print_function
-from builtins import bytes
+# # On an older Ubuntu I setup a python 2.7 virtualenv like this:
+# mkdir virt
+# virtualenv virt
+# cd virt/bin/
+# source activate
+# pip install -U setuptools
+# pip install -U pip
+# pip install future requests treq twisted cryptography
+# # To get out of the virtualenv:
+# deactivate
+# # Or for python 3.4 an upgrade of packages helped:
+# pip install -U requests treq cryptography twisted
+try:
+    from __future__ import print_function
+    from builtins import bytes
+except ImportError as e:
+    print(e)
+    print("Error: You do not have the 'future' library installed in python. Run 'pip install future' for your python version.")
+    exit()
 import socket
 import ssl
 import time
@@ -56,6 +73,7 @@ try:
     requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
     REQUESTS_LIB = True
 except ImportError as e:
+    print(e)
     print("Warning: You do not have the 'requests' library installed in python. This script will only work partially (with urllib). Run 'pip install requests' for your python version.")
     
 TREQ_LIB = False
@@ -73,7 +91,13 @@ try:
     from OpenSSL.SSL import Error as OpenSSLError
     TREQ_LIB = True
 except ImportError as e:
-    print("Warning: You do not have the 'treq' library installed in python. This script will only work partially. Run 'pip install treq' for your python version.")
+    print(e)
+    if "enum" in e:
+        print("Warning: You do not have the 'enum' library installed in python. This script will only work partially. Run 'pip install enum' for your python version.")
+    elif "certificate_transparency" in e:
+        print("Warning: You do not have the 'cryptography' library installed in python. This script will only work partially. Run 'pip install cryptography' for your python version." )
+    else:
+        print("Warning: You do not have the 'treq' library installed in python. This script will only work partially. Run 'pip install treq' for your python version.")
 
 # TODO: Is this worth doing on Linux?
 # try:
