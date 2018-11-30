@@ -53,8 +53,8 @@ Created on 2018 November 26
 # deactivate
 # # Or for python 3.4 an upgrade of packages helped:
 # pip install -U requests treq cryptography twisted
+from __future__ import print_function
 try:
-    from __future__ import print_function
     from builtins import bytes
 except ImportError as e:
     print(e)
