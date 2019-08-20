@@ -1,0 +1,7 @@
+requests
+treq
+twisted
+cryptography
+future
+pyopenssl
+service_identity

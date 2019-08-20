@@ -2,26 +2,21 @@
 # -*- coding: utf-8 -*-
 # This is a python 2/3 hybrid file
 """
-The script allows arbitrary socket and HTTP(S) connections via:
-- socket and ssl-wrapped sockets - when you need bare bone or non-HTTP(S)
-- python urllib/urllib2 HTTP(S) library - when you need HTTP(S) and a little bit more automated HTTP feature handling
-- python requests HTTP(S) library - when you need HTTP(S) and full HTTP feature handling
+The script allows HTTP(S) connections via:
 - python treq (uses Python Twisted and therefore asynchronous IO) - when you need full HTTP(S) feature handling and speed is important
 
 The main features are:
-- Works under python 2.7 and python 3 (although treq here is untested under python 2.7)
+- Works under python 3 (python 2.7 untested but should work in theory)
 - You can just copy and paste an HTTP(S) request (e.g. from a proxy software) without worrying about the parsing and other details
-- You can also use the sockets functions to do non-HTTP related things
 - Ignores any certificate warnings for the server
 
 It should be helpful when:
 - You want to script HTTP(S) requests (e.g. just copy-paste from a proxy like Burp), for example during a pentest or CTF
-- When you encounter a CTF challenge running on a server (like "nc example.org 1234") or a proprietary TCP protocol during pentests
 
 Howto:
 - Change the variables START, END and TLS
 - Optional: Change further configuration options, such as sending the HTTP(S) requests through a proxy
-- Change the 'main' function to send the request you would like to. By default it will send 3 HTTP requests to www.example.org with every library.
+- Change the 'main' function to send the request you would like to. By default it will send 3 HTTP requests to www.example.org.
 
 ----------------------------------------------------------------------------
 "THE BEER-WARE LICENSE" (Revision 42):
@@ -37,22 +32,13 @@ Created on 2018 November 26
 
 ###############################
 ###
-# imports:
-# requests treq twisted cryptography future
+# imports
+# Python2.7:
+# pip install treq twisted cryptography future pyopenssl service_identity
+# Python3.5:
+# pip install requests treq pyopenssl service_identity
 ###
 ###############################
-# # On an older Ubuntu I setup a python 2.7 virtualenv like this:
-# mkdir virt
-# virtualenv virt
-# cd virt/bin/
-# source activate
-# pip install -U setuptools
-# pip install -U pip
-# pip install future requests treq twisted cryptography
-# # To get out of the virtualenv:
-# deactivate
-# # Or for python 3.4 an upgrade of packages helped:
-# pip install -U requests treq cryptography twisted
 from __future__ import print_function
 try:
     from builtins import bytes
@@ -60,23 +46,9 @@ except ImportError as e:
     print(e)
     print("Error: You do not have the 'future' library installed in python. Run 'pip install future' for your python version.")
     exit()
-import socket
-import ssl
 import time
 import sys
 
-REQUESTS_LIB = False
-try:
-    import requests
-    # we don't want to see warnings about insecure certificates
-    from requests.packages.urllib3.exceptions import InsecureRequestWarning
-    requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-    REQUESTS_LIB = True
-except ImportError as e:
-    print(e)
-    print("Warning: You do not have the 'requests' library installed in python. This script will only work partially (with urllib). Run 'pip install requests' for your python version.")
-    
-TREQ_LIB = False
 try:
     import treq
     from twisted.internet import reactor
@@ -92,12 +64,8 @@ try:
     TREQ_LIB = True
 except ImportError as e:
     print(e)
-    if "enum" in e:
-        print("Warning: You do not have the 'enum' library installed in python. This script will only work partially. Run 'pip install enum' for your python version.")
-    elif "certificate_transparency" in e:
-        print("Warning: You do not have the 'cryptography' library installed in python. This script will only work partially. Run 'pip install cryptography' for your python version." )
-    else:
-        print("Warning: You do not have the 'treq' library installed in python. This script will only work partially. Run 'pip install treq' for your python version.")
+    print("Error: You do not have the 'treq', 'twisted' or 'pyopenssl' library installed in python. Run 'pip install treq twisted pyopenssl' for your python version.")
+    exit()
 
 # TODO: Is this worth doing on Linux?
 # try:
@@ -105,9 +73,6 @@ except ImportError as e:
 #     epollreactor.install()
 # except ImportError as e:
 #     print("EPOLL not available (Linux only)")
-
-if not REQUESTS_LIB or not TREQ_LIB:
-    time.sleep(1)
 
 if sys.version_info >= (3, 0):
     # python 3
@@ -126,11 +91,6 @@ if sys.version_info >= (3, 0):
         print("export LC_CTYPE=utf-8")
         print("export PYTHONIOENCODING=utf-8")
         exit()
-    import urllib.request, urllib.error, urllib.parse
-else:
-    # python 2
-    import urllib2
-    
 
 ###############################
 ###
@@ -164,8 +124,6 @@ TLS = False
 ###############################
 DEBUG = False  # More debug output
 TIMEOUT = 2   # Timeout for sockets and HTTP connections
-MAX_DATA_RECV_SOCKET = 10 * 1024  #Maximum amount of data we accept back from the socket
-RECV_BUFF = 1280  #recv() call size
 
 # proxy functionality available with the requests and treq library
 # Not with urllib or sockets
@@ -181,46 +139,8 @@ SEND_THROUGH_PROXY = False
 def main():
     # EXAMPLE: Send numbers 0 and 1 as Firefox User-Agent minor version:
     corpus = range(0, 2)
-    if REQUESTS_LIB:
-        send_with_requests(corpus)
-    send_with_urllib(corpus)
-    send_with_socket(corpus)
-    if TREQ_LIB:
-        send_with_treq(corpus)
 
-def send_with_requests(corpus):
-    for i in corpus:
-        req = RawHttpRequest(START + str(i) + END, TLS)
-        info(i, "sending it with the requests library (which is the most sane choice and can return what we expect - the body HTML)")
-        result(repr(send_requests(req)[:60])+ "...")
-        #result(repr(send_requests(req)))
-        #r = send_requests(req, entire_response=True)
-        #debug(r.request.headers)
-        debug_sleep(15)
-
-def send_with_urllib(corpus):
-    for i in corpus:
-        req = RawHttpRequest(START + str(i) + END, TLS)
-        info(i, "sending it with the urllib library, wouldn't process Content-Encoding (HTML would be gzip'ed) if we wouldn't remove Accept-Encoding in request")
-        result(repr(send_urllib(req)[:60])+ "...")
-        #result(repr(send_urllib(req)))
-        #r = send_urllib(req, entire_response=True)
-        #info(r.request.headers)
-        debug_sleep(15)
-
-def send_with_socket(corpus):
-    for i in corpus:
-        req = RawHttpRequest(START + str(i) + END, TLS)
-        # although this makes more sense in the non-HTTP case:
-        #req = RawRequest(START + str(i) + END, TLS, HOST, PORT)
-        info(i, "sending it via socket, which doesn't know the HTTP protocols and also returns the HTTP headers and also a gziped body (method doesn't remove Accept-Encoding)")
-        result(repr(send_socket(req)[:60]) + "...")
-        #result(repr(send_socket(req)))
-        debug_sleep(15)
-
-def send_with_treq(corpus):
-    # If we need to do it quickly we can send it via Python Twisted and Treq is a higher level API for it
-    # The API is kept very similar to requests
+    # The treq API is kept very similar to the requests library
     # However, as asynchronous network IO works very differently from a code perspective, this will need callback functions
     # at a lot of places. Also deferring things like locks is necessary. Therefore, you will need to reimplement the
     # TreqSenderExample to do your work for you, but it is kept as simple as possible.
@@ -229,12 +149,8 @@ def send_with_treq(corpus):
     # Here you can pass how many TCP connections should be opened at the same time...
     # They will be used in a keep-alive fashion to send multiple HTTP requests through the same TCP stream
     treq_sender = TreqSenderExample(corpus, concurrent=10)
-
-###############################
-###
-# END: Usually you hopefully don't need to change things below here EXCEPT the TreqSenderExample class
-###
-###############################
+    
+    #TODO: Now go down and change the TreqSenderExample class
 
 ###############################
 ###
@@ -333,129 +249,9 @@ class TreqSenderExample(TreqSender):
 
 ###############################
 ###
-# requests library methods, see http://docs.python-requests.org/en/master/api/
+# END: Usually you hopefully don't need to change things below here EXCEPT the TreqSenderExample class
 ###
 ###############################
-
-
-def send_requests(req, entire_response=False, allow_redirects=True):    
-    proxy_dict = None
-    if SEND_THROUGH_PROXY:
-        http_proxy  = "http://127.0.0.1:8080"
-        https_proxy = "https://127.0.0.1:8080"
-
-        proxy_dict = { 
-                      "http"  : http_proxy, 
-                      "https" : https_proxy, 
-                    }
-    headers = dict(req.header_tuples)
-    r = requests.request(req.method, req.url, data=req.body, headers=headers, proxies=proxy_dict, verify=False, timeout=TIMEOUT, allow_redirects=allow_redirects)
-    if entire_response:
-        return r
-    else:
-        return r.text
-
-###############################
-###
-# urllib methods
-###
-###############################
-
-def send_urllib(req, entire_response=False):
-    if sys.version_info >= (3, 0):
-        return send_urllib_python3(req, entire_response=entire_response)
-    else:
-        return send_urllib_python2(req, entire_response=entire_response)
-
-def send_urllib_python3(req, entire_response=False):    
-    opener = urllib.request.build_opener()
-    opener.addheaders = req.header_tuples
-    urllib.request.install_opener(opener)
-    try:
-        start = time.time()
-        if not req.method in ("GET", "POST"):
-            Exception("urllib does not support anything than GET/POST very well") 
-        response = urllib.request.urlopen(req.url, req.body, TIMEOUT)
-        time_taken = time.time() - start
-        response.time_taken = time_taken
-        if entire_response:
-            return response
-        else:
-            return response.read()
-    except urllib.error.HTTPError as e:
-        error('The server couldn\'t fulfill the request. Error code:', e.code)
-    except urllib.error.URLError as e:
-        error("URLError:", e.reason)
-    except Exception as e:
-        error("DIDNT WORK:", e)
-
-def send_urllib_python2(req, entire_response=False):    
-    opener = urllib2.build_opener()
-    opener.addheaders = req.header_tuples
-    urllib2.install_opener(opener)
-    try:
-        start = time.time()
-        if not req.method in ("GET", "POST"):
-            Exception("urllib2 does not support anything than GET/POST very well") 
-        response = urllib2.urlopen(req.url, req.body, TIMEOUT)
-        time_taken = time.time() - start
-        response.time_taken = time_taken
-        if entire_response:
-            return response
-        else:
-            return response.read()
-    except urllib2.HTTPError as e:
-        error('The server couldn\'t fulfill the request. Error code:', e.code)
-    except urllib2.URLError as e:
-        error("URLError:", e.reason)
-    except Exception as e:
-        error("DIDNT WORK:", e)
-
-
-###############################
-###
-# socket methods
-###
-###############################
-
-def send_socket(req):
-    # sys.stdout.write('.')
-    # sys.stdout.flush()
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((req.host, req.port))
-    if req.tls:
-        # ignores any certificate checks etc. by default
-        s = ssl.wrap_socket(s)
-    s.settimeout(TIMEOUT)
-    
-    raw = req.raw
-    try:
-        s.sendall(raw.encode("utf-8"))
-    except Exception as e:
-        error("Socket closed on server side or something else went wrong with socket while sending: ", e)
-    buf = b""
-    data = b""
-    while 1:
-        try:
-            data = s.recv(RECV_BUFF)
-        except socket.timeout as to:
-            # connection timed out
-            pass
-        except Exception as e:
-            print("Error occured while reading")
-            error(e)
-            break
-        if not data:
-            break
-        buf += data
-        #print "Received:", repr(data)
-        if len(buf) >= MAX_DATA_RECV_SOCKET:
-            break
-    try:
-        s.close()
-    except:
-        pass
-    return buf
 
 ###############################
 ###
